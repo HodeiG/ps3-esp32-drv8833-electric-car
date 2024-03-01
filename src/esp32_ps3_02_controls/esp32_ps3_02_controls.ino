@@ -36,13 +36,13 @@ const int DRV8833_IN4 = 25;
 
 
 // Minimum PWM value required to start or stop the motor.
-const int MIN_PWM_VALUE = 10;
+const int MINIMUM_PWM_START_STOP = 10;
 
 // Additional PWM boost applied to ensure reliable motor starting.
-// Experimentation has shown that a PWM value around 110-120 reliably
+// Experimentation has shown that a PWM value around 110-1300 reliably
 // initiates motor motion. This constant ensures that even if the calculated
 // PWM falls slightly below this range, the motor still starts reliably.
-const int PWM_BOOST = 120;
+const int PWM_BOOST_FOR_START = 130;
 
 // Maximum PWM value allowed by the analogWrite function.
 // This constant ensures that the combined PWM value (including the boost)
@@ -50,11 +50,29 @@ const int PWM_BOOST = 120;
 const int MAX_ANALOG_WRITE_VALUE = 255;
 
 
-enum SIDES {LEFT_SIDE, RIGHT_SIDE};
-enum DIRECTIONS {FORWARD, REVERSE};
+enum CarSide {LEFT_SIDE, RIGHT_SIDE};
+enum MovementDirection {FORWARD, REVERSE};
+
+/*
+ * Enhancement 1: Addressing intermittent motion issue due to rapid PS3 events.
+ * 
+ * Observation: Sometimes, when a button was released (e.g., cross button),
+ * the car would continue moving due to frequent PS3 events being sent.
+ * 
+ * Analysis: PS3 events are sent approximately every 10-15 milliseconds,
+ * leading to unnecessary speed change requests.
+ * 
+ * Solution: Record the last event type and value, and initiate a speed change
+ * only if there's a significant value change, determined by the event_value_threshold.
+ * Ensure the margin is not larger than MINIMUM_PWM_VALUE to prevent motors from not stopping.
+ */
+enum PS3EventType  {NONE, CROSS, SQUARE, STICK};
+PS3EventType  last_PS3_event_type   = NONE;
+int last_event_value = 0;
+int event_value_threshold = 10;
 
 
-void control(SIDES side, DIRECTIONS m_direction, int m_speed = 0) {
+void control(CarSide side, MovementDirection m_direction, int m_speed = 0) {
   int pwm_pin;
   int low_pin;
   if (side == LEFT_SIDE) {
@@ -74,8 +92,8 @@ void control(SIDES side, DIRECTIONS m_direction, int m_speed = 0) {
       low_pin = DRV8833_IN3;
     }
   }
-  if (m_speed > MIN_PWM_VALUE) {
-    analogWrite(pwm_pin, min(MAX_ANALOG_WRITE_VALUE, m_speed + PWM_BOOST));
+  if (m_speed > MINIMUM_PWM_START_STOP) {
+    analogWrite(pwm_pin, min(MAX_ANALOG_WRITE_VALUE, m_speed + PWM_BOOST_FOR_START));
     analogWrite(low_pin, LOW);
   } else { // Stop
     analogWrite(pwm_pin, LOW);
@@ -90,6 +108,14 @@ void notify()
   // Cross (X) button pressed
   if ( abs(Ps3.event.analog_changed.button.cross) ) {
     button_pressure = Ps3.data.analog.button.cross;
+    if (last_PS3_event_type == CROSS &&
+        button_pressure <= last_event_value + event_value_threshold &&
+        button_pressure >= last_event_value - event_value_threshold) {
+      return;
+    } 
+    last_PS3_event_type = CROSS;
+    last_event_value = button_pressure;
+
     Serial.print("Pressing the cross button: ");
     Serial.println(button_pressure, DEC);
     control(LEFT_SIDE, FORWARD, button_pressure);
@@ -99,6 +125,14 @@ void notify()
   // Square (■) button pressed
   if ( abs(Ps3.event.analog_changed.button.square) ) {
     button_pressure = Ps3.data.analog.button.square;
+    if (last_PS3_event_type == SQUARE &&
+        button_pressure <= last_event_value + event_value_threshold &&
+        button_pressure >= last_event_value - event_value_threshold) {
+      return;
+    }
+    last_PS3_event_type = SQUARE;
+    last_event_value = button_pressure;
+    
     Serial.print("Pressing the square button: ");
     Serial.println(button_pressure, DEC);
     control(LEFT_SIDE, REVERSE, button_pressure);
@@ -107,13 +141,22 @@ void notify()
 
   // Left analog stick pressed
   if ( abs(Ps3.event.analog_changed.stick.lx) + abs(Ps3.event.analog_changed.stick.ly) > 2 ) {
-    Serial.print("Moved the left stick:");
     int x = Ps3.data.analog.stick.lx;
     int y = Ps3.data.analog.stick.ly;
+    button_pressure = abs(x);
+    if (last_PS3_event_type == STICK &&
+        x <= last_event_value + event_value_threshold &&
+        x >= last_event_value - event_value_threshold) {
+      return;
+    }
+    last_PS3_event_type = STICK;
+    last_event_value = x;
+    
+    Serial.print("Moved the left stick:");
     Serial.print(" x="); Serial.print(x, DEC);
     Serial.print(" y="); Serial.print(y, DEC);
     Serial.println();
-    button_pressure = abs(x);
+    
     if (x < 0) {
       control(LEFT_SIDE, REVERSE, button_pressure);
       control(RIGHT_SIDE, FORWARD, button_pressure);
