@@ -29,8 +29,8 @@ const int DRV8833_EEP = 2;  // Sleep mode input, active high
       IN3: ESP32:GPIO-27 will be used to connect with DRV8833:GPIO-IN1
       IN4: ESP32:GPIO-25 will be used to connect with DRV8833:GPIO-IN1
 */
-const int DRV8833_IN1 = 14;
-const int DRV8833_IN2 = 12;
+const int DRV8833_IN1 = 33;
+const int DRV8833_IN2 = 32;
 const int DRV8833_IN3 = 27;
 const int DRV8833_IN4 = 25;
 
@@ -105,6 +105,35 @@ void notify()
 {
   int button_pressure = 0;
 
+  // Left analog stick pressed
+  if ( abs(Ps3.event.analog_changed.stick.lx) + abs(Ps3.event.analog_changed.stick.ly) > 2 ) {
+    int x = Ps3.data.analog.stick.lx;
+    int y = Ps3.data.analog.stick.ly;
+    button_pressure = abs(x);
+    if (last_PS3_event_type == STICK &&
+        x <= last_event_value + event_value_threshold/2 &&
+        x >= last_event_value - event_value_threshold/2) {
+      return;
+    }
+    last_PS3_event_type = STICK;
+    last_event_value = x;
+    
+    Serial.print("Moved the left stick:");
+    Serial.print(" x="); Serial.print(x, DEC);
+    Serial.print(" y="); Serial.print(y, DEC);
+    Serial.println();
+    
+    if (x < 0) {
+      control(LEFT_SIDE, REVERSE, button_pressure);
+      control(RIGHT_SIDE, FORWARD, button_pressure);
+    } else {
+      control(LEFT_SIDE, FORWARD, button_pressure);
+      control(RIGHT_SIDE, REVERSE, button_pressure);
+    }
+    // If rotating, do not process any other events
+    return;
+  }
+  
   // Cross (X) button pressed
   if ( abs(Ps3.event.analog_changed.button.cross) ) {
     button_pressure = Ps3.data.analog.button.cross;
@@ -137,33 +166,6 @@ void notify()
     Serial.println(button_pressure, DEC);
     control(LEFT_SIDE, REVERSE, button_pressure);
     control(RIGHT_SIDE, REVERSE, button_pressure);
-  }
-
-  // Left analog stick pressed
-  if ( abs(Ps3.event.analog_changed.stick.lx) + abs(Ps3.event.analog_changed.stick.ly) > 2 ) {
-    int x = Ps3.data.analog.stick.lx;
-    int y = Ps3.data.analog.stick.ly;
-    button_pressure = abs(x);
-    if (last_PS3_event_type == STICK &&
-        x <= last_event_value + event_value_threshold &&
-        x >= last_event_value - event_value_threshold) {
-      return;
-    }
-    last_PS3_event_type = STICK;
-    last_event_value = x;
-    
-    Serial.print("Moved the left stick:");
-    Serial.print(" x="); Serial.print(x, DEC);
-    Serial.print(" y="); Serial.print(y, DEC);
-    Serial.println();
-    
-    if (x < 0) {
-      control(LEFT_SIDE, REVERSE, button_pressure);
-      control(RIGHT_SIDE, FORWARD, button_pressure);
-    } else {
-      control(LEFT_SIDE, FORWARD, button_pressure);
-      control(RIGHT_SIDE, REVERSE, button_pressure);
-    }
   }
 }
 
